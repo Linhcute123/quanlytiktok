@@ -1,7 +1,7 @@
 """
 ####################################################################################################
 # SYSTEM: TITAN SOVEREIGN - ENTERPRISE RESOURCE PLANNING (ERP)
-# MODULE: CORE_KERNEL_V99.py
+# MODULE: CORE_KERNEL_V99_STABLE.py
 # ARCHITECT: ADMIN VAN LINH
 # ORGANIZATION: TITAN CORP GLOBAL
 # COPYRIGHT: (C) 2025. ALL RIGHTS RESERVED.
@@ -9,7 +9,7 @@
 # DESCRIPTION:
 # High-fidelity inventory management interface with reactive UI/UX components.
 # Implements Google Sheets API v4 connectivity with asynchronous state management.
-# Features bespoke CSS styling engine (TitanUI) and granular access control logic.
+# PATCHED: GSPREAD V6.0 COMPATIBILITY
 ####################################################################################################
 """
 
@@ -33,7 +33,7 @@ class TitanConfig:
     # META
     APP_NAME = "TITAN SOVEREIGN"
     CODENAME = "PROJECT_OMEGA"
-    VERSION = "Build 99.0.1-Alpha"
+    VERSION = "Build 99.0.2-Stable"
     ADMIN = "Admin Văn Linh"
     
     # DATABASE SCHEMA
@@ -86,11 +86,6 @@ class TitanConfig:
             @keyframes scanline {
                 0% { transform: translateY(-100%); }
                 100% { transform: translateY(100%); }
-            }
-            @keyframes pulse {
-                0% { box-shadow: 0 0 0 0 rgba(0, 255, 0, 0.4); }
-                70% { box-shadow: 0 0 0 10px rgba(0, 255, 0, 0); }
-                100% { box-shadow: 0 0 0 0 rgba(0, 255, 0, 0); }
             }
             @keyframes blink { 50% { opacity: 0; } }
 
@@ -148,12 +143,6 @@ class TitanConfig:
                 color: var(--neon-cyan) !important;
             }
 
-            /* DATAFRAME */
-            div[data-testid="stDataFrame"] {
-                border: 1px solid #333;
-                font-family: 'Share Tech Mono', monospace;
-            }
-
             /* METRICS */
             div[data-testid="metric-container"] {
                 background: #0a0a0a;
@@ -188,24 +177,22 @@ class DatabaseDriver:
     
     @staticmethod
     def _get_creds():
-        # Fallback mechanism for credentials
         if "gcp_service_account" in st.secrets:
             return ServiceAccountCredentials.from_json_keyfile_dict(dict(st.secrets["gcp_service_account"]), TitanConfig.SCOPE)
         return ServiceAccountCredentials.from_json_keyfile_name("credentials.json", TitanConfig.SCOPE)
 
+    # ĐÃ SỬA LỖI TẠI DÒNG DƯỚI ĐÂY (Xóa .models)
     @staticmethod
-    def connect(sheet_id: str) -> Optional[gspread.models.Worksheet]:
+    def connect(sheet_id: str) -> Optional[gspread.Worksheet]:
         if not sheet_id: return None
         try:
             creds = DatabaseDriver._get_creds()
             client = gspread.authorize(creds)
             spreadsheet = client.open_by_key(sheet_id)
             
-            # Auto-Provisioning Logic
             try:
                 ws = spreadsheet.worksheet(TitanConfig.TAB_NAME)
             except gspread.WorksheetNotFound:
-                # Create new schema if missing
                 ws = spreadsheet.add_worksheet(title=TitanConfig.TAB_NAME, rows=5000, cols=20)
                 ws.append_row(TitanConfig.HEADERS)
                 ws.freeze(rows=1)
@@ -227,15 +214,12 @@ class TitanController:
     def ingest_data(self, batch_name: str, raw_payload: str) -> int:
         if not self.ws: return 0
         
-        # 1. Spacing Buffer
         buffer_rows = [[""] * len(TitanConfig.HEADERS) for _ in range(5)]
         
-        # 2. Batch Header with Timestamp
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         header_row = [f"📦 BATCH: {batch_name} [{ts}]"] + [""] * (len(TitanConfig.HEADERS)-1)
         buffer_rows.append(header_row)
         
-        # 3. Payload Parsing
         rows = []
         lines = raw_payload.split("\n")
         valid_count = 0
@@ -247,28 +231,17 @@ class TitanController:
             parts = line.split("|")
             while len(parts) < 6: parts.append("N/A")
             
-            # Logic: Merge Columns
             merged_data = "|".join(parts[2:6])
             raw_data = "|".join(parts[:6])
             
-            # Schema Mapping
             row = [
-                "",                     # BATCH_ID
-                parts[0],               # UID
-                parts[1],               # PASS
-                merged_data,            # COMPOSITE
-                "PENDING",              # FL
-                "PENDING",              # VID
-                "Active",               # STATUS
-                "",                     # WORKER
-                "Live",                 # LIVE
-                raw_data,               # RAW
-                "New"                   # LOG
+                "", parts[0], parts[1], merged_data,
+                "PENDING", "PENDING", "Active", "", "Live",
+                raw_data, "New"
             ]
             rows.append(row)
             valid_count += 1
             
-        # 4. Atomic Commit
         final_payload = buffer_rows + rows
         if valid_count > 0:
             self.ws.append_rows(final_payload)
@@ -278,7 +251,6 @@ class TitanController:
     def execute_fifo_export(self, limit: int) -> Optional[str]:
         if not self.ws: return None
         
-        # Fetch entire dataset
         grid = self.ws.get_all_values()
         
         export_buffer = []
@@ -286,20 +258,16 @@ class TitanController:
         count = 0
         ts = datetime.now().strftime('%d/%m %H:%M')
         
-        # Iterate (Skip header)
         for idx, row in enumerate(grid):
             if idx == 0: continue
-            if len(row) < 2 or row[1] == "": continue # Skip buffers
+            if len(row) < 2 or row[1] == "": continue 
             
-            # Check Log Column (Index 10)
             log_val = row[10] if len(row) > 10 else ""
             
             if "Đã lấy" not in log_val:
-                # Capture Raw (Index 9)
                 raw_val = row[9] if len(row) > 9 else ""
                 export_buffer.append(raw_val)
                 
-                # Queue Update
                 update_queue.append({
                     'range': f'K{idx+1}', 
                     'values': [[f"Đã lấy {ts}"]]
@@ -321,13 +289,11 @@ def render_boot_sequence():
     """Simulates a system boot for effect."""
     if 'booted' not in st.session_state:
         placeholder = st.empty()
-        # Fake loading commands
         commands = [
             "Initializing Kernel...",
             "Loading Neural Modules...",
             "Decrypting Secure Enclave...",
-            "Establishing Uplink to Google Cloud...",
-            "TITAN OS v99.0 Loaded."
+            "TITAN SOVEREIGN v99.0 Loaded."
         ]
         
         with placeholder.container():
@@ -343,19 +309,14 @@ def render_boot_sequence():
 
 def main():
     TitanConfig.inject_css()
-    
-    # SYSTEM BOOT VISUAL
     render_boot_sequence()
 
-    # SIDEBAR CONTROL
     with st.sidebar:
         st.markdown(f"## 🛡️ {TitanConfig.CODENAME}")
         st.markdown(f"<p class='mono-font' style='font-size: 10px; color: #666;'>KERNEL: {TitanConfig.VERSION}</p>", unsafe_allow_html=True)
         st.markdown("---")
-        
         st.markdown("### 🔌 SECURE LINK")
         
-        # ID Handling
         def_id = st.secrets.get("sheet_id", "") if "sheet_id" in st.secrets else ""
         cached_id = st.session_state.get('db_id', def_id)
         
@@ -369,17 +330,15 @@ def main():
         st.markdown("---")
         st.info(f"OPERATOR: {TitanConfig.ADMIN}")
 
-    # LOGIC GATEWAY
     target = st.session_state.get('db_id', def_id)
     
     if not target:
-        # LOCKED STATE UI
         st.markdown("<br><br>", unsafe_allow_html=True)
         c1, c2, c3 = st.columns([1,2,1])
         with c2:
             st.markdown("""
             <div class='titan-card' style='text-align: center;'>
-                <h1 style='color: var(--neon-red); text-shadow: 0 0 10px red;'>SYSTEM LOCKED</h1>
+                <h1 style='color: var(--neon-cyan); text-shadow: 0 0 10px cyan;'>SYSTEM LOCKED</h1>
                 <p class='mono-font'>ACCESS DENIED. MISSING DATABASE IDENTIFIER.</p>
                 <hr style='border-color: #333;'>
                 <p style='color: #888; font-size: 12px;'>Please enter the authorized Google Sheet ID in the Sidebar to unlock the mainframe.</p>
@@ -387,23 +346,17 @@ def main():
             """, unsafe_allow_html=True)
         st.stop()
         
-    # CONNECTED STATE
     ws = DatabaseDriver.connect(target)
     if not ws: st.stop()
     
     controller = TitanController(ws)
     
-    # DASHBOARD HEADER
     st.markdown(f"<h1>{TitanConfig.APP_NAME} <span style='font-size: 14px; vertical-align: middle; border: 1px solid var(--neon-green); padding: 2px 8px; border-radius: 4px; color: var(--neon-green);'>ONLINE</span></h1>", unsafe_allow_html=True)
     
-    # METRICS ENGINE
     try:
         raw = ws.get_all_values()
         df = pd.DataFrame(raw[1:], columns=raw[0])
-        
-        # Advanced Filtering
-        total_assets = len(df[df.iloc[:, 1] != ""]) # Count UIDs
-        # New Assets (Regex match)
+        total_assets = len(df[df.iloc[:, 1] != ""]) 
         new_assets = len(df[df.iloc[:, 10].astype(str).str.contains("New", na=False)])
         
         m1, m2, m3, m4 = st.columns(4)
@@ -417,17 +370,13 @@ def main():
         df = pd.DataFrame()
 
     st.markdown("---")
-    
-    # MAIN OPERATIONS INTERFACE
     tabs = st.tabs(["[ 01_INGEST ]", "[ 02_COMMAND ]", "[ 03_LIQUIDATE ]", "[ 04_SYSTEM ]"])
     
-    # TAB 1: INGESTION
     with tabs[0]:
         c1, c2 = st.columns([1, 2])
         with c1:
             st.markdown("#### BATCH PARAMETERS")
             batch_id = st.text_input("BATCH IDENTIFIER", placeholder="e.g. ALPHA-01")
-            st.caption("Auto-injects 5 buffer rows for separation.")
         with c2:
             st.markdown("#### RAW PAYLOAD STREAM")
             payload = st.text_area("DATA INPUT", height=200, help="User|Pass|Info...", placeholder="Paste raw pipe-separated data here...")
@@ -442,10 +391,8 @@ def main():
             else:
                 st.error("MISSING PARAMETERS.")
 
-    # TAB 2: COMMAND CENTER
     with tabs[1]:
         col_ctrl, col_view = st.columns([1, 3])
-        
         with col_ctrl:
             st.markdown("#### CONTROLS")
             if st.button("REFRESH GRID"): 
@@ -454,11 +401,9 @@ def main():
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("RUN DIAGNOSTICS"):
                 st.toast("DIAGNOSTIC PROTOCOL INITIATED...", icon="⚡")
-                # Add check logic here in future
                 
         with col_view:
             if not df.empty:
-                # Show only active rows
                 view_df = df[(df.iloc[:, 0] != "") | (df.iloc[:, 1] != "")]
                 st.data_editor(
                     view_df,
@@ -475,7 +420,6 @@ def main():
             else:
                 st.info("NO DATA STREAM AVAILABLE.")
 
-    # TAB 3: LIQUIDATION
     with tabs[2]:
         st.markdown("#### ASSET LIQUIDATION PROTOCOL (FIFO)")
         qty = st.number_input("QUANTITY", min_value=1, value=10)
@@ -493,7 +437,6 @@ def main():
             else:
                 st.error("INSUFFICIENT INVENTORY.")
 
-    # TAB 4: SYSTEM INFO
     with tabs[3]:
         st.json({
             "KERNEL": TitanConfig.VERSION,
@@ -502,7 +445,6 @@ def main():
             "UPTIME": "99.999%"
         })
 
-    # TERMINAL FOOTER
     st.markdown(f"""
     <div class='footer-terminal mono-font'>
         root@titan-server:~# status check<br>

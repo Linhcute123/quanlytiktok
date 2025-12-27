@@ -1,195 +1,143 @@
 """
-####################################################################################################
-# SYSTEM: TITAN SOVEREIGN - ENTERPRISE RESOURCE PLANNING (ERP)
-# MODULE: CORE_KERNEL_V99_STABLE.py
-# ARCHITECT: ADMIN VAN LINH
-# ORGANIZATION: TITAN CORP GLOBAL
-# COPYRIGHT: (C) 2025. ALL RIGHTS RESERVED.
-#
-# DESCRIPTION:
-# High-fidelity inventory management interface with reactive UI/UX components.
-# Implements Google Sheets API v4 connectivity with asynchronous state management.
-# PATCHED: GSPREAD V6.0 COMPATIBILITY
-####################################################################################################
+################################################################################
+# HỆ THỐNG: TITAN QUẢN LÝ KHO - PHIÊN BẢN VIỆT NAM
+# PHIÊN BẢN: 2025.1-VN-STABLE
+# TÁC GIẢ: ADMIN VĂN LINH
+# MÔ TẢ: Giao diện tiếng Việt hoàn toàn, tối ưu cho người dùng Việt Nam.
+################################################################################
 """
 
 import streamlit as st
 import gspread
 import pandas as pd
-import numpy as np
 import time
 import random
-import uuid
-import json
 from datetime import datetime
-from typing import Optional, List, Dict
 from oauth2client.service_account import ServiceAccountCredentials
 
-# ==================================================================================================
-# [LAYER 0] CONFIGURATION & ASSETS
-# ==================================================================================================
+# ==============================================================================
+# 1. CẤU HÌNH GIAO DIỆN & MÀU SẮC (THEME VIỆT NAM)
+# ==============================================================================
 
 class TitanConfig:
-    # META
-    APP_NAME = "TITAN SOVEREIGN"
-    CODENAME = "PROJECT_OMEGA"
-    VERSION = "Build 99.0.2-Stable"
-    ADMIN = "Admin Văn Linh"
+    APP_NAME = "QUẢN LÝ KHO TITAN"
+    ADMIN_USER = "Admin Văn Linh"
+    VERSION = "v2025.1 (Tiếng Việt)"
     
-    # DATABASE SCHEMA
+    # Tên Tab trong Google Sheet
     TAB_NAME = "TITAN_MASTER_DB"
+    
+    # Tiêu đề cột (Tiếng Việt cho dễ quản lý)
     HEADERS = [
-        "BATCH_ID", "UID", "PASSWORD", "COMPOSITE_INFO", 
-        "METRIC_FOLLOW", "METRIC_VIDEO", "ACTION_STATUS", 
-        "WORKER_ASSIGN", "LIVE_STATUS", "RAW_PAYLOAD", "LOG_ENTRY"
+        "TÊN LÔ / LOG",     # Cột A
+        "UID",              # Cột B
+        "MẬT KHẨU",         # Cột C
+        "THÔNG TIN GỘP",    # Cột D (Mail|PassMail|2FA)
+        "FOLLOW (AUTO)",    # Cột E
+        "VIDEO (AUTO)",     # Cột F
+        "TRẠNG THÁI",       # Cột G (Active/Kick)
+        "NHÂN VIÊN",        # Cột H
+        "TÌNH TRẠNG",       # Cột I (Live/Die)
+        "DỮ LIỆU GỐC",      # Cột J
+        "GHI CHÚ KHO"       # Cột K (New/Sold)
     ]
+    
     SCOPE = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
-    # --- ADVANCED STYLING ENGINE (CSS) ---
+    # CSS TÙY CHỈNH CHO ĐẸP VÀ DỄ NHÌN
     @staticmethod
     def inject_css():
         st.markdown("""
         <style>
-            @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;500;700&family=Share+Tech+Mono&display=swap');
-
-            /* ROOT VARS */
-            :root {
-                --neon-green: #0f0;
-                --neon-cyan: #0ff;
-                --deep-space: #050505;
-                --glass: rgba(255, 255, 255, 0.05);
-                --border: 1px solid rgba(0, 255, 255, 0.2);
-            }
-
-            /* GLOBAL RESET */
+            /* Font chữ dễ đọc */
+            @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+            
             .stApp {
-                background-color: var(--deep-space);
-                background-image: 
-                    linear-gradient(rgba(0, 255, 0, 0.03) 1px, transparent 1px),
-                    linear-gradient(90deg, rgba(0, 255, 0, 0.03) 1px, transparent 1px);
-                background-size: 30px 30px;
-                font-family: 'Rajdhani', sans-serif;
-                color: #e0e0e0;
+                background-color: #121212; /* Nền đen dịu */
+                color: #E0E0E0;
+                font-family: 'Roboto', sans-serif;
             }
 
-            /* TYPOGRAPHY */
-            h1, h2, h3, h4 {
-                font-family: 'Rajdhani', sans-serif;
-                text-transform: uppercase;
-                letter-spacing: 3px;
-                color: #fff;
-                text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
-            }
-            .mono-font { font-family: 'Share Tech Mono', monospace; }
-
-            /* ANIMATIONS */
-            @keyframes scanline {
-                0% { transform: translateY(-100%); }
-                100% { transform: translateY(100%); }
-            }
-            @keyframes blink { 50% { opacity: 0; } }
-
-            /* COMPONENTS */
-            .titan-card {
-                background: var(--glass);
-                backdrop-filter: blur(10px);
-                border: var(--border);
-                border-radius: 4px;
-                padding: 20px;
-                margin-bottom: 20px;
-                position: relative;
-                overflow: hidden;
-            }
-            .titan-card::before {
-                content: '';
-                position: absolute;
-                top: 0; left: 0; width: 100%; height: 2px;
-                background: linear-gradient(90deg, transparent, var(--neon-green), transparent);
-            }
-
-            /* INPUTS */
-            .stTextInput input, .stTextArea textarea, .stNumberInput input {
-                background: rgba(0,0,0,0.8) !important;
-                border: 1px solid #333 !important;
-                color: var(--neon-cyan) !important;
-                font-family: 'Share Tech Mono', monospace !important;
-                border-radius: 0 !important;
-            }
-            .stTextInput input:focus {
-                border-color: var(--neon-green) !important;
-                box-shadow: 0 0 15px rgba(0, 255, 0, 0.2) !important;
-            }
-
-            /* BUTTONS */
-            .stButton button {
-                background: transparent;
-                border: 1px solid var(--neon-green);
-                color: var(--neon-green);
-                font-family: 'Rajdhani', sans-serif;
+            /* Tiêu đề */
+            h1, h2, h3 {
+                color: #00E676; /* Xanh lá Titan */
                 font-weight: 700;
-                letter-spacing: 2px;
-                border-radius: 0;
-                transition: 0.3s;
                 text-transform: uppercase;
+            }
+
+            /* Ô nhập liệu */
+            .stTextInput input, .stTextArea textarea, .stNumberInput input {
+                background-color: #1E1E1E !important;
+                border: 1px solid #333 !important;
+                color: #FFF !important;
+                border-radius: 8px !important;
+            }
+            .stTextInput input:focus, .stTextArea textarea:focus {
+                border-color: #00E676 !important;
+            }
+
+            /* Nút bấm */
+            .stButton button {
+                background-color: #00E676;
+                color: #000;
+                font-weight: bold;
+                border-radius: 8px;
+                border: none;
+                height: 45px;
+                transition: 0.3s;
             }
             .stButton button:hover {
-                background: var(--neon-green);
-                color: #000;
-                box-shadow: 0 0 20px var(--neon-green);
-            }
-            button[kind="primary"] {
-                background: rgba(0, 255, 255, 0.1) !important;
-                border-color: var(--neon-cyan) !important;
-                color: var(--neon-cyan) !important;
+                background-color: #00C853;
+                color: #FFF;
+                box-shadow: 0 4px 12px rgba(0, 230, 118, 0.4);
             }
 
-            /* METRICS */
-            div[data-testid="metric-container"] {
-                background: #0a0a0a;
-                border-left: 3px solid var(--neon-green);
-                padding: 10px;
+            /* Bảng dữ liệu */
+            div[data-testid="stDataFrame"] {
+                border: 1px solid #333;
+                border-radius: 8px;
             }
-            div[data-testid="stMetricValue"] {
-                color: var(--neon-green) !important;
-                font-family: 'Share Tech Mono', monospace;
-                font-size: 28px !important;
+
+            /* Thông báo lỗi/thành công */
+            .stToast {
+                background-color: #333 !important;
+                color: #fff !important;
+                border: 1px solid #00E676;
             }
             
-            /* FOOTER */
-            .footer-terminal {
-                border-top: 1px dashed #333;
+            /* Footer */
+            .titan-footer {
+                text-align: center;
                 padding: 20px;
                 margin-top: 50px;
-                font-size: 12px;
+                border-top: 1px solid #333;
                 color: #666;
-                text-align: right;
+                font-size: 14px;
             }
-            .blink-cursor { animation: blink 1s infinite; }
         </style>
         """, unsafe_allow_html=True)
 
-# ==================================================================================================
-# [LAYER 1] DATABASE DRIVER
-# ==================================================================================================
+# ==============================================================================
+# 2. XỬ LÝ KẾT NỐI (BACKEND) - ĐÃ FIX LỖI GSPREAD
+# ==============================================================================
 
 class DatabaseDriver:
-    """Handles low-level Google API transactions."""
-    
     @staticmethod
     def _get_creds():
+        # Lấy chìa khóa từ Secrets (Web) hoặc File JSON (Máy tính)
         if "gcp_service_account" in st.secrets:
             return ServiceAccountCredentials.from_json_keyfile_dict(dict(st.secrets["gcp_service_account"]), TitanConfig.SCOPE)
         return ServiceAccountCredentials.from_json_keyfile_name("credentials.json", TitanConfig.SCOPE)
 
-    # ĐÃ SỬA LỖI TẠI DÒNG DƯỚI ĐÂY (Xóa .models)
     @staticmethod
-    def connect(sheet_id: str) -> Optional[gspread.Worksheet]:
+    def connect(sheet_id):
         if not sheet_id: return None
         try:
             creds = DatabaseDriver._get_creds()
             client = gspread.authorize(creds)
             spreadsheet = client.open_by_key(sheet_id)
             
+            # Tự động tạo Sheet nếu chưa có (Auto Provisioning)
             try:
                 ws = spreadsheet.worksheet(TitanConfig.TAB_NAME)
             except gspread.WorksheetNotFound:
@@ -198,259 +146,281 @@ class DatabaseDriver:
                 ws.freeze(rows=1)
             return ws
         except Exception as e:
-            st.error(f"FATAL ERROR: Connection Refused. {str(e)}")
+            st.error(f"⚠️ LỖI KẾT NỐI: {str(e)}")
+            st.info("Gợi ý: Kiểm tra lại ID Sheet hoặc xem đã Share quyền cho email Robot chưa.")
             return None
 
-# ==================================================================================================
-# [LAYER 2] BUSINESS LOGIC CONTROLLER
-# ==================================================================================================
+# ==============================================================================
+# 3. XỬ LÝ NGHIỆP VỤ (LOGIC)
+# ==============================================================================
 
 class TitanController:
-    """Manages data transformation and business rules."""
-    
     def __init__(self, ws):
         self.ws = ws
 
-    def ingest_data(self, batch_name: str, raw_payload: str) -> int:
+    def nhap_kho(self, ten_lo, du_lieu_tho):
+        """Xử lý nhập dữ liệu đầu vào"""
         if not self.ws: return 0
         
-        buffer_rows = [[""] * len(TitanConfig.HEADERS) for _ in range(5)]
+        # 1. Tạo 5 dòng trống cho thoáng
+        rows_to_add = [[""] * len(TitanConfig.HEADERS) for _ in range(5)]
         
-        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        header_row = [f"📦 BATCH: {batch_name} [{ts}]"] + [""] * (len(TitanConfig.HEADERS)-1)
-        buffer_rows.append(header_row)
+        # 2. Tạo dòng tiêu đề lô hàng
+        ngay_gio = datetime.now().strftime('%d/%m/%Y %H:%M')
+        header = [f"📦 LÔ HÀNG: {ten_lo} ({ngay_gio})"] + [""] * (len(TitanConfig.HEADERS)-1)
+        rows_to_add.append(header)
         
-        rows = []
-        lines = raw_payload.split("\n")
-        valid_count = 0
+        # 3. Xử lý từng dòng dữ liệu
+        lines = du_lieu_tho.split("\n")
+        count = 0
         
         for line in lines:
             line = line.strip()
             if not line: continue
             
             parts = line.split("|")
-            while len(parts) < 6: parts.append("N/A")
+            # Điền thêm rỗng nếu thiếu cột
+            while len(parts) < 6: parts.append("")
             
-            merged_data = "|".join(parts[2:6])
-            raw_data = "|".join(parts[:6])
+            # Gộp thông tin (Mail|Pass|2FA...) vào cột D
+            thong_tin_gop = "|".join(parts[2:6])
+            # Giữ nguyên dữ liệu gốc vào cột J
+            du_lieu_goc = "|".join(parts[:6])
             
+            # Sắp xếp đúng thứ tự cột
             row = [
-                "", parts[0], parts[1], merged_data,
-                "PENDING", "PENDING", "Active", "", "Live",
-                raw_data, "New"
+                "",                 # A: Tên lô (để trống cho dòng data)
+                parts[0],           # B: UID
+                parts[1],           # C: Pass
+                thong_tin_gop,      # D: Thông tin gộp
+                "",                 # E: Follow
+                "",                 # F: Video
+                "Active",           # G: Trạng thái
+                "",                 # H: Nhân viên
+                "Live",             # I: Tình trạng
+                du_lieu_goc,        # J: Gốc
+                "New"               # K: Ghi chú (Mới)
             ]
-            rows.append(row)
-            valid_count += 1
+            rows_to_add.append(row)
+            count += 1
             
-        final_payload = buffer_rows + rows
-        if valid_count > 0:
-            self.ws.append_rows(final_payload)
+        # Ghi vào Sheet một lần (cho nhanh)
+        if count > 0:
+            self.ws.append_rows(rows_to_add)
             
-        return valid_count
+        return count
 
-    def execute_fifo_export(self, limit: int) -> Optional[str]:
+    def xuat_kho_fifo(self, so_luong):
+        """Lấy hàng cũ nhất trước (FIFO)"""
         if not self.ws: return None
         
-        grid = self.ws.get_all_values()
+        # Lấy toàn bộ dữ liệu về
+        all_data = self.ws.get_all_values()
         
-        export_buffer = []
-        update_queue = []
-        count = 0
-        ts = datetime.now().strftime('%d/%m %H:%M')
+        ket_qua = []
+        updates = []
+        dem = 0
+        ngay_gio = datetime.now().strftime('%d/%m %H:%M')
         
-        for idx, row in enumerate(grid):
-            if idx == 0: continue
-            if len(row) < 2 or row[1] == "": continue 
+        # Duyệt từng dòng (bỏ dòng đầu tiên là Header bảng)
+        for i, row in enumerate(all_data):
+            if i == 0: continue
+            # Bỏ qua dòng trống hoặc dòng tiêu đề lô
+            if len(row) < 2 or row[1] == "": continue
             
-            log_val = row[10] if len(row) > 10 else ""
+            # Kiểm tra cột K (Ghi chú kho) - index 10
+            trang_thai_kho = row[10] if len(row) > 10 else ""
             
-            if "Đã lấy" not in log_val:
-                raw_val = row[9] if len(row) > 9 else ""
-                export_buffer.append(raw_val)
+            # Nếu chưa có chữ "Đã lấy" thì lấy
+            if "Đã lấy" not in trang_thai_kho:
+                # Lấy cột J (Dữ liệu gốc) - index 9
+                du_lieu = row[9] if len(row) > 9 else ""
+                ket_qua.append(du_lieu)
                 
-                update_queue.append({
-                    'range': f'K{idx+1}', 
-                    'values': [[f"Đã lấy {ts}"]]
+                # Đánh dấu là đã lấy
+                updates.append({
+                    'range': f'K{i+1}', # Cột K dòng tương ứng
+                    'values': [[f"Đã lấy {ngay_gio}"]]
                 })
-                count += 1
-                if count >= limit: break
                 
-        if export_buffer:
-            self.ws.batch_update(update_queue)
-            return "\n".join(export_buffer)
+                dem += 1
+                if dem >= so_luong: break # Đủ số lượng thì dừng
+                
+        if ket_qua:
+            # Cập nhật trạng thái trên Sheet
+            self.ws.batch_update(updates)
+            return "\n".join(ket_qua)
         
         return None
 
-# ==================================================================================================
-# [LAYER 3] USER INTERFACE (TITAN UI)
-# ==================================================================================================
-
-def render_boot_sequence():
-    """Simulates a system boot for effect."""
-    if 'booted' not in st.session_state:
-        placeholder = st.empty()
-        commands = [
-            "Initializing Kernel...",
-            "Loading Neural Modules...",
-            "Decrypting Secure Enclave...",
-            "TITAN SOVEREIGN v99.0 Loaded."
-        ]
-        
-        with placeholder.container():
-            st.markdown("<div style='height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center;'>", unsafe_allow_html=True)
-            for cmd in commands:
-                st.markdown(f"<p class='mono-font' style='color: #0f0;'>root@titan:~# {cmd}</p>", unsafe_allow_html=True)
-                time.sleep(0.3)
-            st.markdown("</div>", unsafe_allow_html=True)
-        
-        time.sleep(0.5)
-        placeholder.empty()
-        st.session_state.booted = True
+# ==============================================================================
+# 4. GIAO DIỆN NGƯỜI DÙNG (FRONTEND)
+# ==============================================================================
 
 def main():
+    st.set_page_config(page_title="Titan Việt Nam", page_icon="🇻🇳", layout="wide")
     TitanConfig.inject_css()
-    render_boot_sequence()
 
+    # --- THANH BÊN (SIDEBAR) ---
     with st.sidebar:
-        st.markdown(f"## 🛡️ {TitanConfig.CODENAME}")
-        st.markdown(f"<p class='mono-font' style='font-size: 10px; color: #666;'>KERNEL: {TitanConfig.VERSION}</p>", unsafe_allow_html=True)
+        st.markdown(f"## 🛡️ {TitanConfig.APP_NAME}")
+        st.caption(f"Phiên bản: {TitanConfig.VERSION}")
         st.markdown("---")
-        st.markdown("### 🔌 SECURE LINK")
         
-        def_id = st.secrets.get("sheet_id", "") if "sheet_id" in st.secrets else ""
-        cached_id = st.session_state.get('db_id', def_id)
+        st.markdown("### 🔌 CẤU HÌNH KẾT NỐI")
         
-        sheet_input = st.text_input("INPUT TARGET IDENTIFIER", value=cached_id, type="password", help="Paste Sheet ID")
+        # Lấy ID mặc định nếu có trong Secrets
+        id_mac_dinh = st.secrets.get("sheet_id", "") if "sheet_id" in st.secrets else ""
+        # Lấy ID đang lưu trong phiên làm việc
+        id_hien_tai = st.session_state.get('saved_id', id_mac_dinh)
         
-        if st.button("INITIATE HANDSHAKE"):
-            st.session_state.db_id = sheet_input
-            st.cache_resource.clear()
-            st.rerun()
+        nhap_id = st.text_input("Nhập ID Google Sheet:", value=id_hien_tai, type="password", help="Dán đoạn mã ID của Sheet vào đây")
+        
+        if st.button("🔗 KẾT NỐI NGAY"):
+            st.session_state.saved_id = nhap_id
+            st.cache_resource.clear() # Xóa bộ nhớ đệm để kết nối lại
+            st.success("Đã lưu ID!")
+            time.sleep(0.5)
+            st.rerun() # Tải lại trang
             
         st.markdown("---")
-        st.info(f"OPERATOR: {TitanConfig.ADMIN}")
+        st.info(f"Người điều hành: {TitanConfig.ADMIN_USER}")
 
-    target = st.session_state.get('db_id', def_id)
+    # --- KIỂM TRA ID ---
+    target_id = st.session_state.get('saved_id', id_mac_dinh)
     
-    if not target:
+    if not target_id:
+        # Màn hình chào mừng khi chưa nhập ID
         st.markdown("<br><br>", unsafe_allow_html=True)
-        c1, c2, c3 = st.columns([1,2,1])
+        c1, c2, c3 = st.columns([1, 2, 1])
         with c2:
-            st.markdown("""
-            <div class='titan-card' style='text-align: center;'>
-                <h1 style='color: var(--neon-cyan); text-shadow: 0 0 10px cyan;'>SYSTEM LOCKED</h1>
-                <p class='mono-font'>ACCESS DENIED. MISSING DATABASE IDENTIFIER.</p>
-                <hr style='border-color: #333;'>
-                <p style='color: #888; font-size: 12px;'>Please enter the authorized Google Sheet ID in the Sidebar to unlock the mainframe.</p>
-            </div>
-            """, unsafe_allow_html=True)
+            st.info("👋 Chào Sếp! Vui lòng nhập **ID Google Sheet** ở thanh bên trái để bắt đầu làm việc.")
+            st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/d/d0/Google_Sheets_logo_%282014-2020%29.svg/1200px-Google_Sheets_logo_%282014-2020%29.svg.png", width=100)
         st.stop()
         
-    ws = DatabaseDriver.connect(target)
-    if not ws: st.stop()
+    # --- KẾT NỐI DATABASE ---
+    ws = DatabaseDriver.connect(target_id)
+    if not ws: st.stop() # Dừng nếu lỗi kết nối
     
     controller = TitanController(ws)
     
-    st.markdown(f"<h1>{TitanConfig.APP_NAME} <span style='font-size: 14px; vertical-align: middle; border: 1px solid var(--neon-green); padding: 2px 8px; border-radius: 4px; color: var(--neon-green);'>ONLINE</span></h1>", unsafe_allow_html=True)
+    # --- MÀN HÌNH CHÍNH (DASHBOARD) ---
+    st.title(f"{TitanConfig.APP_NAME} 🇻🇳")
     
+    # Thống kê nhanh
     try:
         raw = ws.get_all_values()
         df = pd.DataFrame(raw[1:], columns=raw[0])
-        total_assets = len(df[df.iloc[:, 1] != ""]) 
-        new_assets = len(df[df.iloc[:, 10].astype(str).str.contains("New", na=False)])
         
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("TOTAL ASSETS", f"{total_assets:,}")
-        m2.metric("LIQUID ASSETS", f"{new_assets:,}")
-        m3.metric("LATENCY", f"{random.randint(12, 45)}ms")
-        m4.metric("ENCRYPTION", "AES-256")
+        # Đếm tổng số dòng có UID (Cột B khác rỗng)
+        tong_acc = len(df[df.iloc[:, 1] != ""])
+        # Đếm số dòng có chữ "New" ở cột K
+        acc_moi = len(df[df.iloc[:, 10].astype(str).str.contains("New", na=False)])
+        
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("📦 TỔNG TÀI KHOẢN", f"{tong_acc:,}")
+        c2.metric("✅ HÀNG MỚI (NEW)", f"{acc_moi:,}")
+        c3.metric("⚡ TRẠNG THÁI", "ĐANG HOẠT ĐỘNG")
+        c4.metric("📅 NGÀY", datetime.now().strftime("%d/%m"))
         
     except Exception:
-        st.warning("DATABASE INITIALIZED. WAITING FOR DATA INGESTION.")
+        st.warning("Kho dữ liệu mới. Vui lòng nhập lô hàng đầu tiên.")
         df = pd.DataFrame()
 
     st.markdown("---")
-    tabs = st.tabs(["[ 01_INGEST ]", "[ 02_COMMAND ]", "[ 03_LIQUIDATE ]", "[ 04_SYSTEM ]"])
     
-    with tabs[0]:
-        c1, c2 = st.columns([1, 2])
-        with c1:
-            st.markdown("#### BATCH PARAMETERS")
-            batch_id = st.text_input("BATCH IDENTIFIER", placeholder="e.g. ALPHA-01")
-        with c2:
-            st.markdown("#### RAW PAYLOAD STREAM")
-            payload = st.text_area("DATA INPUT", height=200, help="User|Pass|Info...", placeholder="Paste raw pipe-separated data here...")
+    # --- CÁC TAB CHỨC NĂNG ---
+    tab1, tab2, tab3, tab4 = st.tabs(["📥 NHẬP KHO", "📋 DANH SÁCH", "📤 XUẤT ĐƠN", "⚙️ HỆ THỐNG"])
+    
+    # TAB 1: NHẬP KHO
+    with tab1:
+        col_trai, col_phai = st.columns([1, 2])
+        with col_trai:
+            st.subheader("1. Thông tin Lô hàng")
+            ten_lo = st.text_input("Tên Lô (Ví dụ: Via Ngoại 27/12)")
+            st.info("💡 Hệ thống sẽ tự động thêm 5 dòng trống để phân cách các lô.")
             
-        if st.button(">>> EXECUTE UPLOAD SEQUENCE", key="btn_upload"):
-            if batch_id and payload:
-                with st.spinner("PARSING DATAGRAMS..."):
-                    count = controller.ingest_data(batch_id, payload)
-                    st.success(f"UPLOAD COMPLETE. {count} UNITS ADDED.")
+        with col_phai:
+            st.subheader("2. Dữ liệu đầu vào")
+            du_lieu = st.text_area("Dán dữ liệu vào đây (User|Pass|...)", height=250, placeholder="Định dạng: UID|Pass|2FA|Mail|PassMail|...")
+            
+        if st.button("🚀 TIẾN HÀNH NHẬP KHO", type="primary"):
+            if ten_lo and du_lieu:
+                with st.spinner("Đang xử lý dữ liệu, vui lòng đợi..."):
+                    so_luong = controller.nhap_kho(ten_lo, du_lieu)
+                    st.toast(f"✅ Đã nhập thành công {so_luong} tài khoản!", icon="🎉")
                     time.sleep(1)
                     st.rerun()
             else:
-                st.error("MISSING PARAMETERS.")
+                st.error("Vui lòng nhập đầy đủ Tên lô và Dữ liệu!")
 
-    with tabs[1]:
-        col_ctrl, col_view = st.columns([1, 3])
-        with col_ctrl:
-            st.markdown("#### CONTROLS")
-            if st.button("REFRESH GRID"): 
+    # TAB 2: DANH SÁCH (QUẢN LÝ)
+    with tab2:
+        c_tacvu, c_bang = st.columns([1, 4])
+        with c_tacvu:
+            st.subheader("Tác vụ")
+            if st.button("🔄 Tải lại dữ liệu"):
                 st.cache_resource.clear()
                 st.rerun()
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("RUN DIAGNOSTICS"):
-                st.toast("DIAGNOSTIC PROTOCOL INITIATED...", icon="⚡")
+            st.caption("Bấm nút trên để cập nhật danh sách mới nhất từ Google Sheet.")
                 
-        with col_view:
+        with c_bang:
             if not df.empty:
-                view_df = df[(df.iloc[:, 0] != "") | (df.iloc[:, 1] != "")]
+                # Lọc bỏ các dòng trống
+                df_hien_thi = df[(df.iloc[:, 0] != "") | (df.iloc[:, 1] != "")]
                 st.data_editor(
-                    view_df,
+                    df_hien_thi,
                     height=500,
                     use_container_width=True,
                     column_config={
-                        "WORKER_ASSIGN": st.column_config.CheckboxColumn("ASSIGN", width="small"),
-                        "ACTION_STATUS": st.column_config.SelectboxColumn("STATUS", options=["Active", "Kicked", "Dead"], width="small"),
-                        "COMPOSITE_INFO": st.column_config.TextColumn("INFO", width="large"),
+                        "TRẠNG THÁI": st.column_config.SelectboxColumn("Trạng thái", options=["Active", "Kicked", "Die"], width="small"),
+                        "NHÂN VIÊN": st.column_config.CheckboxColumn("Đã giao", width="small"),
                         "UID": st.column_config.TextColumn("UID", disabled=True),
                     },
                     hide_index=True
                 )
             else:
-                st.info("NO DATA STREAM AVAILABLE.")
+                st.info("Chưa có dữ liệu nào trong kho.")
 
-    with tabs[2]:
-        st.markdown("#### ASSET LIQUIDATION PROTOCOL (FIFO)")
-        qty = st.number_input("QUANTITY", min_value=1, value=10)
+    # TAB 3: XUẤT ĐƠN (FIFO)
+    with tab3:
+        st.subheader("Xuất hàng theo nguyên tắc Cũ Nhất - Ra Trước (FIFO)")
+        c1, c2 = st.columns(2)
+        with c1:
+            so_luong_xuat = st.number_input("Nhập số lượng cần lấy:", min_value=1, value=10)
+            
+            if st.button("📦 LẤY HÀNG & TẢI FILE"):
+                ket_qua = controller.xuat_kho_fifo(so_luong_xuat)
+                if ket_qua:
+                    file_name = f"DonHang_{datetime.now().strftime('%d%m_%H%M')}.txt"
+                    st.download_button("💾 BẤM ĐỂ TẢI XUỐNG (.TXT)", ket_qua, file_name=file_name)
+                    st.success(f"Đã trích xuất xong {so_luong_xuat} tài khoản!")
+                else:
+                    st.error("Kho đã hết hàng 'New' (Mới)!")
         
-        if st.button(">>> EXTRACT & MARK SOLD"):
-            data_out = controller.execute_fifo_export(qty)
-            if data_out:
-                st.download_button(
-                    label="DOWNLOAD SECURE PACKAGE",
-                    data=data_out,
-                    file_name=f"EXPORT_{uuid.uuid4().hex[:8].upper()}.txt",
-                    mime="text/plain"
-                )
-                st.success("EXTRACTION SUCCESSFUL.")
-            else:
-                st.error("INSUFFICIENT INVENTORY.")
+        with c2:
+            st.markdown("""
+            **Nguyên tắc hoạt động:**
+            1. Hệ thống tìm các dòng có ghi chú **'New'**.
+            2. Lấy hàng từ trên xuống dưới (Hàng nhập trước lấy trước).
+            3. Tự động đổi ghi chú thành **'Đã lấy [Giờ/Ngày]'**.
+            4. Xuất ra file TXT.
+            """)
 
-    with tabs[3]:
+    # TAB 4: HỆ THỐNG
+    with tab4:
         st.json({
-            "KERNEL": TitanConfig.VERSION,
-            "CONNECTED_NODE": target[:8] + "******",
-            "USER_AGENT": TitanConfig.ADMIN,
-            "UPTIME": "99.999%"
+            "Ứng dụng": TitanConfig.APP_NAME,
+            "Phiên bản": TitanConfig.VERSION,
+            "ID Sheet đang kết nối": target_id,
+            "Trạng thái": "Hoạt động tốt"
         })
 
+    # CHÂN TRANG
     st.markdown(f"""
-    <div class='footer-terminal mono-font'>
-        root@titan-server:~# status check<br>
-        > SYSTEM OPTIMAL<br>
-        > DEVELOPED BY <span style='color: var(--neon-green);'>{TitanConfig.ADMIN}</span><br>
-        > <span class='blink-cursor'>_</span>
+    <div class="titan-footer">
+        <p>Được phát triển bởi <b>{TitanConfig.ADMIN_USER}</b><br>
+        Bản quyền thuộc về Titan Enterprise © 2025</p>
     </div>
     """, unsafe_allow_html=True)
 
